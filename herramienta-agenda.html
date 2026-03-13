@@ -145,7 +145,7 @@
                 <button class="btn-range active" onclick="setQuickRange('custom')">Personalizado</button>
             </div>
             <div class="date-inputs">
-                <input type="date" id="start-date" onchange="autoSave(); initEditor();">
+                <input type="date" id="start-date" onchange="autoSetEndDate(); autoSave(); initEditor();">
                 <input type="date" id="end-date" onchange="autoSave(); initEditor();">
             </div>
         </section>
@@ -198,6 +198,17 @@
     <script>
         // URL DE GOOGLE APPS SCRIPT INTEGRADA
         const API = "https://script.google.com/macros/s/AKfycbzZBw3OkxTUgpJK0IMgu8T-ZBbeWS0KvRT30Lo-4GOh3QMsq7TSRxceZi3YlsnAIBG3/exec";
+
+        // Horario base por día de la semana (0=Dom, 1=Lun, 2=Mar, 3=Mie, 4=Jue, 5=Vie, 6=Sab)
+        // Cada sesión: 50 min de atención + 10 min de descanso
+        const DEFAULT_SCHEDULE = {
+            1: ["10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "6:00 PM"],  // Lunes
+            2: ["10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "6:00 PM"],  // Martes
+            3: ["9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "5:00 PM", "6:00 PM"],  // Miércoles
+            4: ["9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "5:00 PM", "6:00 PM"],  // Jueves
+            5: ["10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM"],                         // Viernes
+            6: ["10:00 AM", "11:00 AM", "12:00 PM", "4:00 PM", "5:00 PM", "6:00 PM"],  // Sábado
+        };
         
         const dayNames = ["DOMINGO", "LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO"];
         const monthNames = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -223,15 +234,30 @@
             }
         }
 
+        function autoSetEndDate() {
+            const startVal = document.getElementById('start-date').value;
+            if(!startVal) return;
+            const start = new Date(startVal + "T00:00:00");
+            const dow = start.getDay(); // 0=Dom, 6=Sab
+            const daysUntilSat = dow === 6 ? 0 : (6 - dow);
+            const sat = new Date(start);
+            sat.setDate(start.getDate() + daysUntilSat);
+            document.getElementById('end-date').value = sat.toISOString().split('T')[0];
+        }
+
         function setQuickRange(type) {
             const start = document.getElementById('start-date');
             const end = document.getElementById('end-date');
             if(type === 'week') {
                 const now = new Date();
-                const d1 = new Date(now.setDate(now.getDate() - now.getDay() + 1));
-                const d2 = new Date(now.setDate(now.getDate() - now.getDay() + 6));
-                start.value = d1.toISOString().split('T')[0];
-                end.value = d2.toISOString().split('T')[0];
+                const dow = now.getDay();
+                const daysToMon = dow === 0 ? -6 : 1 - dow;
+                const mon = new Date(now);
+                mon.setDate(now.getDate() + daysToMon);
+                const sat = new Date(mon);
+                sat.setDate(mon.getDate() + 5);
+                start.value = mon.toISOString().split('T')[0];
+                end.value = sat.toISOString().split('T')[0];
             }
             autoSave();
             initEditor();
@@ -272,21 +298,39 @@
         }
 
         function initEditor() {
-            const s = document.getElementById('start-date').value;
-            const e = document.getElementById('end-date').value;
+            let s = document.getElementById('start-date').value;
+            let e = document.getElementById('end-date').value;
             const editor = document.getElementById('manual-editor');
             if(!s || !e) { editor.innerHTML = ''; return; }
-            editor.innerHTML = '';
+
+            // Auto-corregir fechas invertidas
+            if(s > e) {
+                [s, e] = [e, s];
+                document.getElementById('start-date').value = s;
+                document.getElementById('end-date').value = e;
+                editor.innerHTML = '<p style="color:#b71c1c;font-size:0.8rem;padding:8px;text-align:center;">⚠️ Fechas corregidas automáticamente</p>';
+            } else {
+                editor.innerHTML = '';
+            }
+
             let curr = new Date(s + "T00:00:00");
             const last = new Date(e + "T00:00:00");
             while(curr <= last) {
-                if(curr.getDay() !== 0) {
+                const dow = curr.getDay();
+                if(dow !== 0) {
                     const key = curr.toISOString().split('T')[0];
+                    // Pre-poblar con horario base si el día no tiene datos aún
+                    if(agenda[key] === undefined) {
+                        agenda[key] = [...(DEFAULT_SCHEDULE[dow] || [])];
+                    }
                     const row = document.createElement('div');
                     row.className = 'day-edit-row';
-                    const hours = agenda[key] || [];
+                    const hours = agenda[key];
                     row.innerHTML = `
-                        <div class="day-title">${dayNames[curr.getDay()]} ${curr.getDate()}</div>
+                        <div class="day-title" style="display:flex;justify-content:space-between;align-items:center;">
+                            <span>${dayNames[dow]} ${curr.getDate()}</span>
+                            <button onclick="addHour('${key}')" style="background:var(--eucalyptus-dark);color:white;border:none;border-radius:50%;width:22px;height:22px;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">+</button>
+                        </div>
                         <div class="chips">
                             ${hours.map((h, i) => `
                                 <div class="chip">
@@ -301,6 +345,22 @@
                 curr.setDate(curr.getDate() + 1);
             }
             autoSave();
+        }
+
+        function addHour(key) {
+            const newTime = prompt("Ingresa la hora (ej: 3:00 PM o 15:00):");
+            if(!newTime) return;
+            let normalized = newTime.trim().toUpperCase();
+            if(!normalized.includes('AM') && !normalized.includes('PM')) {
+                const [h, m] = normalized.split(':');
+                const hNum = parseInt(h);
+                const ampm = hNum >= 12 ? 'PM' : 'AM';
+                const h12 = hNum % 12 || 12;
+                normalized = `${h12}:${m || '00'} ${ampm}`;
+            }
+            if(!agenda[key]) agenda[key] = [];
+            agenda[key].push(normalized);
+            cleanAndSave(key);
         }
 
         const parseToMins = (str) => {
