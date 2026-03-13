@@ -285,9 +285,11 @@
                     const time = new Date(item.start);
                     let h = time.getHours();
                     const m = time.getMinutes();
+                    // Redondear a hora entera: >=30 min sube al siguiente, <30 trunca
+                    if(m >= 30) h = (h + 1) % 24;
                     const ampm = h >= 12 ? 'PM' : 'AM';
                     let hDisplay = h % 12 || 12;
-                    const tStr = `${hDisplay}:${m === 0 ? '00' : (m < 10 ? '0'+m : m)} ${ampm}`;
+                    const tStr = `${hDisplay}:00 ${ampm}`;
                     if(!agenda[item.dateKey]) agenda[item.dateKey] = [];
                     agenda[item.dateKey].push(tStr);
                 });
@@ -403,11 +405,9 @@
 
             document.getElementById('confirm-shift-no').onclick = () => {
                 agenda[key][index] = formatFromMins(newMins);
-                const nextAvailableMins = newMins + 60;
-                
+                // Siguiente cita = hora editada + 60 min (50 sesión + 10 break)
                 if (index + 1 < agenda[key].length) {
-                    let nextInPunto = Math.ceil(nextAvailableMins / 60) * 60;
-                    agenda[key][index + 1] = formatFromMins(nextInPunto);
+                    agenda[key][index + 1] = formatFromMins(newMins + 60);
                 }
                 cleanAndSave(key);
             };
